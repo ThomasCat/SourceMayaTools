@@ -1,7 +1,4 @@
 # SourceMayaTools
-[![license](https://img.shields.io/github/license/ThomasCat/SourceMayaTools.svg)]()
-[![GitHub release](https://img.shields.io/github/release/ThomasCat/SourceMayaTools.svg)]()
-[![Github Releases](https://img.shields.io/github/downloads/ThomasCat/SourceMayaTools/total.svg)]()
 
 A plugin for Maya 2012 and newer for exporting models and animations to Source.
 Based on [CoDMayaTools](https://github.com/LunaRyuko/CoDMayaTools)
