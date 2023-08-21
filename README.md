@@ -1,6 +1,6 @@
 # SourceMayaTools
 
-A plugin for Maya 2012 and newer for exporting models and animations to Source.
+A plugin for Maya 2023 and newer for exporting models and animations to Source.
 Based on [CoDMayaTools](https://github.com/LunaRyuko/CoDMayaTools)
 
 # Features
