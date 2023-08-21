@@ -1,4 +1,4 @@
-# Copyright 2019, Luna 'Ryuko' Zaremba
+# Copyright 2018, Maciej Ray Marcin
 
 # SourceMayaTools is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,18 +19,12 @@
 #	+ Original - Initial release
 # VERSION 1.0.1
 #   + Fix scaling issue between different units
-# VERSION 1.1
-#   + Add an option to subtract animation data from a frame
-#   + Add a config variable to replace the first underscore in joint names with a dot
-# VERSION 1.2
-#   + Experimental scale support
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------- Customization (You can change these values!) ----------------------------------------------------------
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 MAX_WARNINGS_SHOWN = 100 # Maximum number of warnings to show per export
 EXPORT_WINDOW_NUMSLOTS = 100 # Number of slots in the export windows
-REPLACE_FIRST_UNDERSCORE = True # Whether to replace the first underscore in joint names with a dot (example: j_shoulder_le -> j.shoulder_le). This is in order to keep parity with MESA's SMD importer.
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------------- Global ------------------------------------------------------------------------------
@@ -45,12 +39,12 @@ import os.path
 import traceback
 import maya.OpenMaya as OpenMaya
 import maya.OpenMayaAnim as OpenMayaAnim
-import urllib2
+import urllib.request, urllib.error, urllib.parse
 import socket
 import subprocess
 import webbrowser
-import Queue
-import _winreg as reg
+import queue
+import winreg as reg
 import time
 import struct
 import shutil
@@ -127,7 +121,7 @@ def GetJointList():
             continue
         
         # Breadth first search of joint tree
-        searchQueue = Queue.Queue(0)
+        searchQueue = queue.Queue(0)
         searchQueue.put((-1, dagNode, True)) # (index = child node's parent index, child node)
         while not searchQueue.empty():
             node = searchQueue.get()
@@ -183,7 +177,7 @@ def GetMaterialsFromMesh(mesh, dagPath):
             shaderNode = OpenMaya.MFnDependencyNode(shaders[i])
             shaderPlug = shaderNode.findPlug("surfaceShader")
             material = OpenMaya.MPlugArray()
-            shaderPlug.connectedTo(material, 1, 0)
+            shaderPlug.connectedTo(material, 1, 0);
             
             for j in range(material.length()):
                     materialNode = OpenMaya.MFnDependencyNode(material[j].node())
@@ -246,130 +240,7 @@ def WriteJointData(f, jointC):
 
     joint_scale = (scale[0], scale[1], scale[2])
 
-    f.write("%f %f %f  %f %f %f\n" % (joint_offset[0] * scale[0], joint_offset[1] * scale[1], joint_offset[2] * scale[2], joint_rotation[0], joint_rotation[1], joint_rotation[2]))
-
-def GetJointData(jointC):
-    jointNode = jointC[1]
-    # Get the joint's transform
-    path = OpenMaya.MDagPath() 
-    jointNode.getPath(path)
-    transform = OpenMaya.MFnTransform(path)
-    
-    # Get joint position
-    pos = transform.getTranslation(OpenMaya.MSpace.kTransform)
-    
-    # Get scale (almost always 1)
-    scaleUtil = OpenMaya.MScriptUtil()
-    scaleUtil.createFromList([1,1,1], 3)
-    scalePtr = scaleUtil.asDoublePtr()
-    transform.getScale(scalePtr)
-    scale = [OpenMaya.MScriptUtil.getDoubleArrayItem(scalePtr, 0), OpenMaya.MScriptUtil.getDoubleArrayItem(scalePtr, 1), OpenMaya.MScriptUtil.getDoubleArrayItem(scalePtr, 2)]
-    
-    # Get rotation matrix (mat is a 4x4, but the last row and column arn't needed)
-    jointRotQuat = __math_matrixtoquat__(cmds.getAttr(path.fullPathName()+".matrix"))
-
-    joint_offset = (pos.x*CM_TO_INCH * scale[0], pos.y*CM_TO_INCH * scale[1], pos.z*CM_TO_INCH * scale[2])
-
-    return ( joint_offset, jointRotQuat )
-
-def WriteJointDataSubstracted(f, jointC, jointData):
-    jointNode = jointC[1]
-    # Get the joint's transform
-    path = OpenMaya.MDagPath() 
-    jointNode.getPath(path)
-    transform = OpenMaya.MFnTransform(path)
-
-    # Get joint position
-    pos = transform.getTranslation(OpenMaya.MSpace.kTransform)
-    
-    # Get scale (almost always 1)
-    scaleUtil = OpenMaya.MScriptUtil()
-    scaleUtil.createFromList([1,1,1], 3)
-    scalePtr = scaleUtil.asDoublePtr()
-    transform.getScale(scalePtr)
-    scale = [OpenMaya.MScriptUtil.getDoubleArrayItem(scalePtr, 0), OpenMaya.MScriptUtil.getDoubleArrayItem(scalePtr, 1), OpenMaya.MScriptUtil.getDoubleArrayItem(scalePtr, 2)]
-    
-    # Get rotation matrix (mat is a 4x4, but the last row and column arn't needed)
-    jointRotQuat = __math_matrixtoquat__(cmds.getAttr(path.fullPathName()+".matrix"))
-
-    jointInvQuat = __quat_inverse(jointData[1])
-
-    jointSubQuat = __quat_multiply(jointInvQuat, jointRotQuat)
-
-    eulerRotation = jointSubQuat.asEulerRotation()
-
-    joint_offset = (pos.x*CM_TO_INCH * scale[0], pos.y*CM_TO_INCH * scale[1], pos.z*CM_TO_INCH * scale[2])
-
-    joint_rotation = (eulerRotation.x,eulerRotation.y,eulerRotation.z)
-
-    joint_scale = (scale[0], scale[1], scale[2])
-
-    f.write("%f %f %f  %f %f %f\n" % (joint_offset[0]-jointData[0][0], joint_offset[1]-jointData[0][1], joint_offset[2]-jointData[0][2], joint_rotation[0], joint_rotation[1], joint_rotation[2]))
-
-def __toMayaQuat(x,y,z,w):
-    return OpenMaya.MQuaternion(x, y, z, w)
-
-def __QuatToArray(q):
-    return [q.x, q.y, q.z, q.w]
-
-def __quat_conjugate(quat):
-    result = OpenMaya.MQuaternion()
-    result.x = -quat.x
-    result.y = -quat.y
-    result.z = -quat.z
-    result.w = quat.w
-    return result
-
-def __quat_dotproduct(quat1, quat2):
-    return quat1.x * quat2.x + quat1.y * quat2.y + quat1.z * quat2.z + quat1.w * quat2.w
-
-def __quat_inverse(quat):
-    dotp = __quat_dotproduct(quat, quat)
-    conjugated = __quat_conjugate(quat)
-    if(dotp > 0):
-        inv = 1.0 / dotp
-        conjugated.x *= inv
-        conjugated.y *= inv
-        conjugated.z *= inv
-        conjugated.w *= inv
-
-    return conjugated
-
-def __quat_align(p, q):
-    a = 0
-    b = 0
-    result = OpenMaya.MQuaternion()
-    for i in range(0, 4):
-        a += (p[i]-q[i])*(p[i]-q[i])
-        b += (p[i]+q[i])*(p[i]+q[i])
-    
-    if(a > b):
-        result.x = -q.x
-        result.y = -q.y
-        result.z = -q.z
-        result.w = -q.w
-    else:
-        result.x = q.x
-        result.y = q.y
-        result.z = q.z
-        result.w = q.w
-    
-    return result
-
-
-
-def __quat_multiply(p, q):
-    q2 = __quat_align(p, q)
-
-    result = OpenMaya.MQuaternion()
-
-    result.x =  p.x * q2.w + p.y * q2.z - p.z * q2.y + p.w * q2.x
-    result.y = -p.x * q2.z + p.y * q2.w + p.z * q2.x + p.w * q2.y
-    result.z =  p.x * q2.y - p.y * q2.x + p.z * q2.w + p.w * q2.z
-    result.w = -p.x * q2.x - p.y * q2.y - p.z * q2.z + p.w * q2.w
-
-    return result
-
+    f.write("%f %f %f  %f %f %f\n" % (joint_offset[0], joint_offset[1], joint_offset[2], joint_rotation[0], joint_rotation[1], joint_rotation[2]))
 
 
 # Converts a set of vertices (toConvertVertexIndices) from object-relative IDs to face-relative IDs
@@ -457,7 +328,7 @@ def GetShapes(joints):
         while not vertIter.isDone():
             if not hasSkin:
                 verts.append((vertIter.position(OpenMaya.MSpace.kWorld), []))
-                vertIter.next()
+                next(vertIter)
                 continue
             
             # Get weight values
@@ -498,7 +369,7 @@ def GetShapes(joints):
             ))
             
             # Next vert
-            vertIter.next()
+            next(vertIter)
         
         # Get materials used by this mesh
         meshMaterials = GetMaterialsFromMesh(mesh, dagPath)
@@ -513,7 +384,7 @@ def GetShapes(joints):
             # Every face must have a material
             if polyMaterial == None:
                 PrintWarning("Found no material on face '%s.f[%d]'; ignoring face" % (dagPath.partialPathName(), polyIter.index()))
-                polyIter.next()
+                next(polyIter)
                 continue
             
             # Add this poly's material to the global list of used materials
@@ -543,7 +414,7 @@ def GetShapes(joints):
             polyIter.getNormals(normals, OpenMaya.MSpace.kWorld)
             
             # Add each triangle in this poly to the global face list
-            for i in range(triangleIndices.length()/3): # vertexIndices.length() has 3 values per triangle
+            for i in range(len(triangleIndices)//3): # vertexIndices.length() has 3 values per triangle
                 # Put local indices into an array for easy access
                 locals = [localTriangleIndices[i*3], localTriangleIndices[i*3+1], localTriangleIndices[i*3+2]]
                 
@@ -568,7 +439,7 @@ def GetShapes(joints):
                 ))
             
             # Next poly
-            polyIter.next()
+            next(polyIter)
         
         # Update starting vertex index
         currentStartingVertIndex = len(verts)
@@ -604,7 +475,7 @@ def ExportSMDModel(filePath):
     # Get data
     joints = GetJointList()
     if len(joints) > 128:
-        print "Warning: More than 128 joints have been selected. The model might not compile."
+        print("Warning: More than 128 joints have been selected. The model might not compile.")
 
     shapes = GetShapes(joints)
     if type(shapes) == str:
@@ -639,10 +510,7 @@ def ExportSMDModel(filePath):
         for i, joint in enumerate(joints):
             name = joint[1].partialPathName().split("|")
             name = name[len(name)-1].split(":") # Remove namespace prefixes
-            if REPLACE_FIRST_UNDERSCORE == True:
-                name = name[len(name)-1].replace('_', '.', 1)
-            else:
-                name = name[len(name)-1]
+            name = name[len(name)-1]
             f.write("%i \"%s\" %i\n" % (i, name, joint[0]))
     f.write("end\n")
 
@@ -652,6 +520,9 @@ def ExportSMDModel(filePath):
         f.write("0 0 0 0 0 0 0\n")
     else:
         for i, joint in enumerate(joints):
+            name = joint[1].partialPathName().split("|")
+            name = name[len(name)-1].split(":") # Remove namespace prefixes
+            name = name[len(name)-1]
             f.write("%i  " % (i))
             WriteJointData(f, joint)
     f.write("end\n")
@@ -695,13 +566,10 @@ def ExportSMDAnim(filePath):
     if len(joints) == 0:
         return "Error: No joints selected for export"
     if len(joints) > 128:
-        print "Warning: More than 128 joints have been selected. The animation might not compile."
+        print("Warning: More than 128 joints have been selected. The animation might not compile.")
 
     frameStart = cmds.intField(OBJECT_NAMES['smdanim'][0]+"_FrameStartField", query=True, value=True)
     frameEnd = cmds.intField(OBJECT_NAMES['smdanim'][0]+"_FrameEndField", query=True, value=True)
-
-    substract = cmds.checkBox(OBJECT_NAMES['smdanim'][0]+("_SubstractCheckBox"), query=True, value=True)
-    substractFrame = cmds.intField(OBJECT_NAMES['smdanim'][0]+("_SubstractFrame"), query=True, value=True)
 
     # Open file
     f = None
@@ -732,30 +600,23 @@ def ExportSMDAnim(filePath):
         for i, joint in enumerate(joints):
             name = joint[1].partialPathName().split("|")
             name = name[len(name)-1].split(":") # Remove namespace prefixes
-            name = name[len(name)-1].replace('_', '.', 1)
+            name = name[len(name)-1]
             f.write("%i \"%s\" %i\n" % (i, name, joint[0]))
     f.write("end\n")
 
     f.write("skeleton\n")
-
-    cmds.currentTime(substractFrame)
-    jointsToSubstract = []
-    for i, joint in enumerate(joints):
-        jointsToSubstract.append(GetJointData(joint))
-
-
     for i in range(int(frameStart), int(frameEnd+1)):
         f.write("time %i\n" % (i - frameStart)) 
         cmds.currentTime(i)
         if len(joints) == 0:
             f.write("0 0 0 0 0 0 0\n")
         else:
-            for j, joint in enumerate(joints):
-                f.write("%i  " % (j))
-                if(substract == True):
-                    WriteJointDataSubstracted(f, joint, jointsToSubstract[j])
-                else:
-                    WriteJointData(f, joint)
+            for i, joint in enumerate(joints):
+                name = joint[1].partialPathName().split("|")
+                name = name[len(name)-1].split(":") # Remove namespace prefixes
+                name = name[len(name)-1]
+                f.write("%i  " % (i))
+                WriteJointData(f, joint)
     f.write("end\n")
 
     f.close()
@@ -824,7 +685,7 @@ def CreateSMDModelWindow():
     form = cmds.formLayout(OBJECT_NAMES['smdmodel'][0]+"_Form")
     
     # Controls
-    slotDropDown = cmds.optionMenu(OBJECT_NAMES['smdmodel'][0]+"_SlotDropDown", changeCommand=lambda x:RefreshSMDModelWindow(), annotation="Each slot contains different a export path, settings, and saved selection")
+    slotDropDown = cmds.optionMenu(OBJECT_NAMES['smdmodel'][0]+"_SlotDropDown", changeCommand=lambda x:RefreshXModelWindow(), annotation="Each slot contains different a export path, settings, and saved selection")
     for i in range(1, EXPORT_WINDOW_NUMSLOTS+1):
         cmds.menuItem(OBJECT_NAMES['smdmodel'][0]+"_SlotDropDown"+("_s%i" % i), label="Slot %i" % i)
     
@@ -832,7 +693,7 @@ def CreateSMDModelWindow():
     separator2 = cmds.separator(style='in')
     
     saveToLabel = cmds.text(label="Save to:", annotation="This is where the .xmodel_export is saved to")
-    saveToField = cmds.textField(OBJECT_NAMES['smdmodel'][0]+"_SaveToField", height=21, changeCommand=lambda x:GeneralWindow_SaveToField('smdmodel'), annotation="This is where the .xmodel_export is saved to")
+    saveToField = cmds.textField(OBJECT_NAMES['smdmodel'][0]+"_SaveToField", height=21, changeCommand=lambda x:GeneralWindow_SaveToField('xmodel'), annotation="This is where the .xmodel_export is saved to")
     fileBrowserButton = cmds.button(label="...", height=21, command=lambda x:GeneralWindow_FileBrowser('smdmodel', "SMD File (*.smd)"), annotation="Open a file browser dialog")
     
     exportSelectedButton = cmds.button(label="Export Selected", command=lambda x:GeneralWindow_ExportSelected('smdmodel', False), annotation="Export all currently selected objects from the scene (current frame)\nWarning: Will automatically overwrite if the export path if it already exists")
@@ -922,9 +783,6 @@ def CreateSMDAnimWindow():
     framesToLabel = cmds.text(label="to")
     framesEndField = cmds.intField(OBJECT_NAMES['smdanim'][0]+"_FrameEndField", height=21, width=35, minValue=0, changeCommand=SMDAnimWindow_UpdateFrameRange, annotation="Ending frame to export (inclusive)")
 
-    substractCheckbox = cmds.checkBox(OBJECT_NAMES['smdanim'][0]+"_SubstractCheckBox", label="Substract", changeCommand=SMDAnimWindow_UpdateAnimData, annotation="Check this to substract animation data using a specified frame")
-    substractFrameField = cmds.intField(OBJECT_NAMES['smdanim'][0]+"_SubstractFrame", height=21, width=35, minValue=0, changeCommand=SMDAnimWindow_UpdateAnimData, annotation="The frame you want to substract ")
-
     saveToLabel = cmds.text(label="Save to:", annotation="This is where .smd is saved to")
     saveToField = cmds.textField(OBJECT_NAMES['smdanim'][0]+"_SaveToField", height=21, changeCommand=lambda x:GeneralWindow_SaveToField('smdanim'), annotation="This is where .xanim_export is saved to")
     fileBrowserButton = cmds.button(label="...", height=21, command=lambda x:GeneralWindow_FileBrowser('smdanim', "SMD File (*.smd)"), annotation="Open a file browser dialog")
@@ -940,7 +798,6 @@ def CreateSMDAnimWindow():
         attachForm=[(slotDropDown, 'top', 6), (slotDropDown, 'left', 10), (slotDropDown, 'right', 10),
                     (separator1, 'left', 0), (separator1, 'right', 0),
                     (framesLabel, 'left', 10),
-                    (substractCheckbox, 'left', 10),
                     (separator2, 'left', 0), (separator2, 'right', 0),
                     (saveToLabel, 'left', 12),
                     (fileBrowserButton, 'right', 10),
@@ -955,7 +812,6 @@ def CreateSMDAnimWindow():
                         (framesStartField, 'top', 5, separator1), (framesStartField, 'left', 4, framesLabel),
                         (framesToLabel, 'top', 8, separator1), (framesToLabel, 'left', 4+35+4, framesLabel),
                         (framesEndField, 'top', 5, separator1), (framesEndField, 'left', 4, framesToLabel),
-                        (substractCheckbox, 'bottom', 10, separator2), (substractFrameField, 'left', 10, substractCheckbox), (substractFrameField, 'bottom', 8, separator2),
                         (separator2, 'bottom', 5, fileBrowserButton),
                         (saveToLabel, 'bottom', 10, exportSelectedButton),
                         (saveToField, 'bottom', 5, exportSelectedButton), (saveToField, 'left', 5, saveToLabel), (saveToField, 'right', 5, fileBrowserButton),
@@ -981,13 +837,6 @@ def SMDAnimWindow_UpdateMultiplier(required_parameter):
     slotIndex = cmds.optionMenu(OBJECT_NAMES['smdanim'][0]+"_SlotDropDown", query=True, select=True)
     fps = cmds.intField(OBJECT_NAMES['smdanim'][0]+"_qualityField", query=True, value=True)
     cmds.setAttr(OBJECT_NAMES['smdanim'][2]+(".multiplier[%i]" % slotIndex), fps)
-
-def SMDAnimWindow_UpdateAnimData(required_parameter):
-    slotIndex = cmds.optionMenu(OBJECT_NAMES['smdanim'][0]+"_SlotDropDown", query=True, select=True)
-    substractCheckbox = cmds.checkBox(OBJECT_NAMES['smdanim'][0]+"_SubstractCheckBox", query=True, value=True)
-    substractFrame = cmds.intField(OBJECT_NAMES['smdanim'][0]+"_SubstractFrame", query=True, value=True)
-    cmds.setAttr(OBJECT_NAMES['smdanim'][2]+(".substract[%i]" % slotIndex), substractCheckbox)
-    cmds.setAttr(OBJECT_NAMES['smdanim'][2]+(".substractFrames[%i]" % slotIndex), substractFrame)
 
 def SMDAnimWindow_AddNote(required_parameter):
     slotIndex = cmds.optionMenu(OBJECT_NAMES['smdanim'][0]+"_SlotDropDown", query=True, select=True)
@@ -1221,13 +1070,6 @@ def RefreshSMDAnimWindow():
     if not cmds.attributeQuery("useinmultiexport", node=OBJECT_NAMES['smdanim'][2], exists=True):
         cmds.addAttr(OBJECT_NAMES['smdanim'][2], longName="useinmultiexport", multi=True, attributeType='bool', defaultValue=False)
         cmds.setAttr(OBJECT_NAMES['smdanim'][2]+".useinmultiexport", size=EXPORT_WINDOW_NUMSLOTS)
-
-    if not cmds.attributeQuery("substract", node=OBJECT_NAMES['smdanim'][2], exists=True):
-        cmds.addAttr(OBJECT_NAMES['smdanim'][2], longName="substract", multi=True, attributeType='bool', defaultValue=False)
-        cmds.setAttr(OBJECT_NAMES['smdanim'][2]+".substract", size=EXPORT_WINDOW_NUMSLOTS)
-    if not cmds.attributeQuery("substractFrames", node=OBJECT_NAMES['smdanim'][2], exists=True):
-        cmds.addAttr(OBJECT_NAMES['smdanim'][2], longName="substractFrames", multi=True, attributeType='long', defaultValue=0)
-        cmds.setAttr(OBJECT_NAMES['smdanim'][2]+".substractFrames", size=EXPORT_WINDOW_NUMSLOTS)
     
     cmds.lockNode(OBJECT_NAMES['smdanim'][2], lock=True)
     
@@ -1246,11 +1088,6 @@ def RefreshSMDAnimWindow():
     else:
         cmds.intField(OBJECT_NAMES['smdanim'][0]+"_FrameStartField", edit=True, value=frameRange[0][0])
         cmds.intField(OBJECT_NAMES['smdanim'][0]+"_FrameEndField", edit=True, value=frameRange[0][1])
-
-    substract = cmds.getAttr(OBJECT_NAMES['smdanim'][2]+(".substract[%i]" % slotIndex))
-    substractFrame = cmds.getAttr(OBJECT_NAMES['smdanim'][2]+(".substractFrames[%i]" % slotIndex))
-    cmds.checkBox(OBJECT_NAMES['smdanim'][0]+"_SubstractCheckBox", edit=True, value=substract)
-    cmds.intField(OBJECT_NAMES['smdanim'][0]+"_SubstractFrame", edit=True, value=substractFrame)
     
         
     useInMultiExport = cmds.getAttr(OBJECT_NAMES['smdanim'][2]+(".useinmultiexport[%i]" % slotIndex))
@@ -1282,10 +1119,10 @@ def SaveReminder(allowUnsaved=True):
 def PrintWarning(message):
     global WarningsDuringExport
     if WarningsDuringExport < MAX_WARNINGS_SHOWN:
-        print "WARNING: %s" % message
+        print("WARNING: %s" % message)
         WarningsDuringExport += 1
     elif WarningsDuringExport == MAX_WARNINGS_SHOWN:
-        print "More warnings not shown because printing text is slow...\n"
+        print("More warnings not shown because printing text is slow...\n")
         WarningsDuringExport = MAX_WARNINGS_SHOWN+1
 
 def MessageBox(message):
@@ -1299,7 +1136,7 @@ def ProgressBarStep():
     cmds.progressBar(OBJECT_NAMES['progress'][0], edit=True, step=1)
 
 def AboutWindow():
-    result = cmds.confirmDialog(message="Source Engine Tools for Maya, created by Luna Ryuko (based on CoDMayaTools).\n\nThis script is under the GNU General Public License. You may modify or redistribute this script, however it comes with no warranty. Go to http://www.gnu.org/licenses/ for more details.", button=['OK'], defaultButton='OK', title="About Source Maya Tools")
+    result = cmds.confirmDialog(message="Source Engine Tools for Maya, created by Maciej Ray Marcin (based on CoDMayaTools).\n\nThis script is under the GNU General Public License. You may modify or redistribute this script, however it comes with no warranty. Go to http://www.gnu.org/licenses/ for more details.", button=['OK'], defaultButton='OK', title="About Source Maya Tools")
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # ---------------------------------------------------------------------- General Export Window ---------------------------------------------------------------------
@@ -1394,7 +1231,7 @@ def GeneralWindow_ExportSelected(windowID, exportingMultiple):
     
     # Handle response
     
-    if type(response) == str or type(response) == unicode:
+    if type(response) == str or type(response) == str:
         if exportingMultiple:
             MessageBox("Slot %i\n\n%s" % (slotIndex, response))
         else:
@@ -1424,7 +1261,7 @@ def GeneralWindow_ExportMultiple(windowID):
     for i in range(1, EXPORT_WINDOW_NUMSLOTS+1):
         useInMultiExport = cmds.getAttr(OBJECT_NAMES[windowID][2]+(".useinmultiexport[%i]" % i))
         if useInMultiExport:
-            print "Exporting slot %i in multiexport" % i
+            print("Exporting slot %i in multiexport" % i)
             cmds.optionMenu(OBJECT_NAMES[windowID][0]+"_SlotDropDown", edit=True, select=i)
             exec(OBJECT_NAMES[windowID][3] + "()") # Refresh window
             if GeneralWindow_GetSavedSelection(windowID):
