@@ -14,6 +14,6 @@ Based on [CoDMayaTools](https://github.com/LunaRyuko/CoDMayaTools)
  - ThomasCat: Updated to Python 3
  - Maciej Ray Marcin: Main Developer
  - DTZxPorter: Matrix to Quaternion code from [SETools](https://github.com/dtzxporter/SETools/)
- - Aidan Shafran, Scobalula & Luna Ryuko: CoDMayaTools Developers
+ - Aidan Shafran, Scobalula & Maciej Ray Marcin: CoDMayaTools Developers
  - SE2Dev: Minor cleanup
  - Cortland: provided a singular line of code
